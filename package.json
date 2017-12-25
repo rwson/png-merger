@@ -1,0 +1,35 @@
+{
+  "name": "png-merger",
+  "version": "1.0.0",
+  "description": "a nodejs command line tool to merge pngs",
+  "scripts": {
+    "watch": "babel src --watch --out-dir bin",
+    "test": "node bin/index.js i=test/images i=test/imgs c=test l=1"
+  },
+  "engines": {
+    "node": ">=6"
+  },
+  "bin": {
+    "png-merger": "bin/index.js"
+  },
+  "keywords": [
+    "png",
+    "spirte"
+  ],
+  "author": "rwson",
+  "license": "ISC",
+  "dependencies": {
+    "color-console": "0.0.1",
+    "commander": "^2.12.2",
+    "css": "^2.2.1",
+    "fs-extra-promise": "^1.0.1",
+    "jimp": "^0.2.28",
+    "node-version": "^1.0.0"
+  },
+  "devDependencies": {
+    "babel-cli": "^6.24.1",
+    "babel-core": "^6.25.0",
+    "babel-preset-node6": "^11.0.0",
+    "babel-preset-stage-0": "^6.24.1"
+  }
+}
