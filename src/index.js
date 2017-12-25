@@ -171,17 +171,40 @@ const pickUpCsses = async(dir) => {
             }
         } catch (e) {}
     },
-    sortBySize = () => {
-        return pngInfos.sort((prev, next) => {
-            return prev.width - next.width;
+    sortBy = (arr, width = false) => {
+        return arr.sort((prev, next) => {
+            if (width) {
+                return prev.width - next.width;
+            }
+            return prev.height - next.height;
         });
     },
+    prevSize = (index) => {},
     toRows = () => {
-        let tmp;
-        const res = [];
+        let row, max,
+            res = [];
         for (let i = 0; i < pngInfos.length;) {
+            row = pngInfos.slice(i, i + 9);
+            row = sortBy(row);
+            row = row.map((item, index) => {
+                item.pos = {};
+                if (i === 0) {
+                    if (index === 0) {
+                        item.pos = {
+                            x: 0,
+                            y: 0
+                        };
+                    } else {
+                        item.pos = {
+                            x: 0,
+                            y: 0
+                        };
+                    }
+                }
+                return item;
+            });
+            res.push(row);
             i += 9;
-            
         }
         return res;
     };
@@ -199,8 +222,10 @@ const init = async({
     for (let dir of csses) {
         await pickUpCsses(dir);
     }
-    pngInfos = sortBySize(pngInfos);
+    pngInfos = sortBy(pngInfos, true);
+    pngInfos = toRows(pngInfos);
 
+    // console.log(pngInfos);
 };
 
 init(cfgs);

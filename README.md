@@ -1,23 +1,3 @@
-# create-koa-project
+# png-merger
 
-a command line tool to create koa application quickly
-
-
-
-#### screenshot
-
-![screen](screen.gif)
-
-
-
-#### usage
-
-```bash
-npm install create-koa-project -g
-```
-
-```bash
-create-koa-project <your-koa-project-name>
-```
-
-happy coding 😄
+自动将项目中的零散png合并成雪碧图并修改css中的引用
