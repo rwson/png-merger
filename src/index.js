@@ -3,14 +3,19 @@
 import * as path from "path";
 import * as fse from "fs-extra-promise";
 import * as cConsole from "color-console";
-import jimp from "jimp";
 import css from "css";
+import image from "images";
+import puppeteer from "puppeteer";
 import nodeVersion from "node-version";
 
 if (nodeVersion.major < 6) {
     cConsole.red("png-merger requires at least version 6 of NodeJs. Please upgrade!");
     process.exit(1);
 }
+
+let pngInfos = [],
+    cssInfos = [],
+    tipPath;
 
 const cwd = process.cwd(),
     hasOwnProp = (obj, key) => obj.hasOwnProperty(key),
@@ -84,13 +89,18 @@ const cwd = process.cwd(),
     args = parseArgs(process.argv.slice(2), {
         images: "i",
         csses: "c",
-        level: "l"
+        level: "l",
+        size: "s"
     });
 
 const cfgs = {
         images: [],
         csses: [],
-        level: Number(args.level || 1)
+        level: Number(args.level || 1),
+        max: {
+            width: Number(args.size.split("x")[0]),
+            height: Number(args.size.split("x")[1])
+        }
     },
     regs = {
         pngSuffix: /\.png$/,
@@ -98,14 +108,7 @@ const cfgs = {
         urlRefence: /url\s*\((\s*[A-Za-z0-9\-\_\.\/\:]+\s*)\);?/gi,
         urlPrefix: /^url\(/,
         urlSuffix: /\)[\w\W]+$/
-    },
-    maxPngSize = {
-        width: 10000,
-        height: 10000
     };
-
-let pngInfos = [],
-    cssInfos = [];
 
 if (args.images) {
     if (Array.isArray(args.images)) {
@@ -160,13 +163,13 @@ const pickUpCsses = async(dir) => {
                 if (fse.isDirectorySync(file)) {
                     pickUpPngs(file);
                 } else if (regs.pngSuffix.test(file)) {
-                    info = await jimp.read(file);
-                    info.bitmap.data = info.bitmap.data.toString("utf8");
-                    delete info.bitmap.data;
-                    pngInfos.push({
-                        file,
-                        ...info.bitmap
-                    });
+                    info = image(file).size();
+                    if (info.width <= cfgs.max.width && info.height <= cfgs.max.height) {
+                        pngInfos.push({
+                            file,
+                            ...info
+                        });
+                    }
                 }
             }
         } catch (e) {}
@@ -179,10 +182,11 @@ const pickUpCsses = async(dir) => {
             return prev.height - next.height;
         });
     },
-    prevSize = (index) => {},
+    maxHeight = (row) => {
+        return row[row.length - 1].height;
+    },
     toRows = () => {
-        let row, max,
-            res = [];
+        let row, rowWidth, colHeight, rowIndex, colIndex, res = [];
         for (let i = 0; i < pngInfos.length;) {
             row = pngInfos.slice(i, i + 9);
             row = sortBy(row);
@@ -196,9 +200,35 @@ const pickUpCsses = async(dir) => {
                         };
                     } else {
                         item.pos = {
-                            x: 0,
                             y: 0
                         };
+                        rowWidth = 0;
+                        for (rowIndex = 0; rowIndex < index; rowIndex++) {
+                            rowWidth += row[rowIndex].width;
+                        }
+                        item.pos.x = rowWidth;
+                    }
+                } else {
+                    if (index === 0) {
+                        item.pos = {
+                            x: 0
+                        };
+                        colHeight = 0;
+                        for (colIndex = 0; colIndex < i / 9; colIndex += 1) {
+                            colHeight += maxHeight(res[colIndex]);
+                        }
+                        item.pos.y = colHeight;
+                    } else {
+                        rowWidth = 0;
+                        colHeight = 0;
+                        for (rowIndex = 0; rowIndex < index; rowIndex++) {
+                            rowWidth += row[rowIndex].width;
+                        }
+                        for (colIndex = 0; colIndex < i / 9; colIndex += 1) {
+                            colHeight += maxHeight(res[colIndex]);
+                        }
+                        item.pos.x = rowWidth;
+                        item.pos.y = colHeight;
                     }
                 }
                 return item;
@@ -209,13 +239,61 @@ const pickUpCsses = async(dir) => {
         return res;
     };
 
+const makeMarkUp = async(nodes, total) => {
+    let html = [], page;
+    tipPath = path.resolve(cwd, "png-tip.jpg");
+    html.push("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><style type='text/css'>body {position: relative:background: transparent;}.node-el {position: absolute;font-size: 12px;color: #336;}</style></head><body>");
+    for (let row of nodes) {
+        for (let { pos, textPos, width, height } of row) {
+            html.push(`<div class="node-el" style="left: ${textPos.x}px; top: ${textPos.y}px;">
+                        x: ${pos.x} <br/> y: ${pos.y}
+                    </div>`);
+        }
+    }
+    html.push("</body></html>");
+    html = html.join("");
+    try {
+        puppeteer.launch({
+            ...total.tip
+        }).then(async browser => {
+            page = await browser.newPage();
+            await page.setContent(html);
+            await page.screenshot({
+                path: tipPath,
+                fullPage: true
+            });
+            await browser.close();
+        });
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
 const init = async({
     images = [],
     csses = [],
     level = 1
 }) => {
-    const merged = [],
-        canvases = [];
+    const canvas = {
+            dist: null,
+            distName: `png-mergered.png`,
+            tip: null,
+            tipName: null
+        },
+        total = {
+            dist: {
+                width: 0,
+                height: 0
+            },
+            tip: {
+                width: 0,
+                height: 0
+            }
+        };
+
+    let tmp, rowWidth, colHeight, makeRes, rowLen, colLen, pos;
+
     for (let dir of images) {
         await pickUpPngs(dir);
     }
@@ -225,7 +303,69 @@ const init = async({
     pngInfos = sortBy(pngInfos, true);
     pngInfos = toRows(pngInfos);
 
-    // console.log(pngInfos);
+    colHeight = 0;
+
+    colLen = pngInfos.length;
+    pngInfos.forEach((row) => {
+        rowLen = pngInfos.length;
+        tmp = [];
+        rowWidth = 0;
+        row.forEach((item, index) => {
+            // item.drawPos = {
+            //     x: pngInfos[colLen - 1][index] ? pngInfos[colLen - 1][index].pos.x : item.pos.x,
+            //     y: item.pos.y
+            // };
+            // pos = {
+            //     x: item.pos.x,
+            //     y: item.pos.y + (index * 50)
+            // };
+            // row[index].textPos = pos;
+            // rowWidth += item.width;
+        });
+        colHeight += maxHeight(row);
+        tmp.push(rowWidth);
+    });
+
+    total.dist = {
+        width: Math.max.apply(null, tmp),
+        height: colHeight
+    };
+
+    total.tip = {
+        width: Math.max.apply(null, tmp),
+        height: colHeight + pngInfos.length * 50
+    };
+
+    canvas.dist = image(total.dist.width, total.dist.height);
+
+    pngInfos.forEach((row, rowIndex) => {
+        row.forEach(({ file, width, height, pos, drawPos }, colIndex) => {
+            console.log(drawPos)
+            canvas.dist.draw(image(file), pos.x, pos.y);
+        });
+    });
+
+    // makeRes = await makeMarkUp(pngInfos, total);
+
+    if (makeRes) {
+        canvas.tipName = path.basename(tipPath);
+        canvas.tip = image(total.tip.width, total.tip.height);
+
+        pngInfos.forEach((row, rowIndex) => {
+            row.forEach(({ file, width, height, pos }, colIndex) => {
+                // canvas.tip.draw(image(file), pos.x, tmp.y);
+            });
+        });
+        // canvas.tip.save(canvas.tipName);
+    }
+
+    if (typeof canvas.dist.save === "function") {
+        canvas.dist.save(canvas.distName, {
+            quality: 100 * level
+        });
+    }
+
+    image.gc();
 };
 
 init(cfgs);
