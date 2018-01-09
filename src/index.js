@@ -18,7 +18,19 @@ let pngInfos = [],
     tipPath;
 
 const cwd = process.cwd(),
+    /**
+     * obj.hasOwnProperty简写
+     * @param  {Object} obj
+     * @param  {String} key
+     * @return {Boolean}
+     */
     hasOwnProp = (obj, key) => obj.hasOwnProperty(key),
+
+    /**
+     * 读取文件内容变成字符串
+     * @param  {String} file
+     * @return {String/null}
+     */
     fileToString = (file) => {
         try {
             const stream = fse.readFileSync(file);
@@ -27,6 +39,13 @@ const cwd = process.cwd(),
             return null;
         }
     },
+
+    /**
+     * 是否包含某个属性值
+     * @param  {Object} obj
+     * @param  {String} val
+     * @return {Object}
+     */
     contain = (obj = {}, val = "") => {
         for (let key of Object.keys(obj)) {
             if (obj[key] === val) {
@@ -40,6 +59,13 @@ const cwd = process.cwd(),
             contained: false
         };
     },
+
+    /**
+     * 解析参数数组
+     * @param  {Array}  args
+     * @param  {Object} alias
+     * @return {Object}
+     */
     parseArgs = (args = [], alias = {}) => {
         const res = {};
         args = args.map((arg) => arg.replace(/^-+/, ""));
@@ -86,14 +112,14 @@ const cwd = process.cwd(),
         }
         return res;
     },
+
     args = parseArgs(process.argv.slice(2), {
         images: "i",
         csses: "c",
         level: "l",
         size: "s"
-    });
-
-const cfgs = {
+    }),
+    cfgs = {
         images: [],
         csses: [],
         level: Number(args.level || 1),
@@ -130,6 +156,12 @@ if (args.csses) {
     }
 }
 
+
+    /**
+     * 从某个目录提取所有css文件并解析成AST
+     * @param  {String} dir
+     * @return {Array}
+     */
 const pickUpCsses = async(dir) => {
         try {
             const files = fse.readdirSync(dir);
@@ -154,9 +186,16 @@ const pickUpCsses = async(dir) => {
             }
         } catch (e) {}
     },
+
+    /**
+     * 从某个目录提取符合条件的png
+     * @param  {String} dir
+     * @return {Array}
+     */
     pickUpPngs = async(dir) => {
         try {
-            const files = fse.readdirSync(dir);
+            const files = fse.readdirSync(dir),
+                { width, height } = cfgs.max;
             let info;
             for (let file of files) {
                 file = path.resolve(dir, file);
@@ -164,7 +203,7 @@ const pickUpCsses = async(dir) => {
                     pickUpPngs(file);
                 } else if (regs.pngSuffix.test(file)) {
                     info = image(file).size();
-                    if (info.width <= cfgs.max.width && info.height <= cfgs.max.height) {
+                    if (info.width <= width && info.height <= height) {
                         pngInfos.push({
                             file,
                             ...info
@@ -174,6 +213,13 @@ const pickUpCsses = async(dir) => {
             }
         } catch (e) {}
     },
+
+    /**
+     * 排序
+     * @param  {Array}  arr
+     * @param  {Boolean} width
+     * @return {Array}
+     */
     sortBy = (arr, width = false) => {
         return arr.sort((prev, next) => {
             if (width) {
@@ -182,9 +228,20 @@ const pickUpCsses = async(dir) => {
             return prev.height - next.height;
         });
     },
+
+    /**
+     * 获取最大高度
+     * @param  {Array} row
+     * @return {Number}
+     */
     maxHeight = (row) => {
         return row[row.length - 1].height;
     },
+
+    /**
+     * 把一维数组转换成由10个项组成的二维数组
+     * @return {Array}
+     */
     toRows = () => {
         let row, rowWidth, colHeight, rowIndex, colIndex, res = [];
         for (let i = 0; i < pngInfos.length;) {
@@ -239,6 +296,12 @@ const pickUpCsses = async(dir) => {
         return res;
     };
 
+/**
+ * 根据每个节点值生成HTML结构, 生成标注图的底图
+ * @param  {[type]} nodes
+ * @param  {[type]} total
+ * @return {Boolean}
+ */
 const makeMarkUp = async(nodes, total) => {
     let html = [], page;
     tipPath = path.resolve(cwd, "png-tip.jpg");
@@ -270,6 +333,12 @@ const makeMarkUp = async(nodes, total) => {
     }
 };
 
+/**
+ * 主入口
+ * @param  {Array}  options.images [description]
+ * @param  {Array}  options.csses  [description]
+ * @param  {Number} options.level  [description]
+ */
 const init = async({
     images = [],
     csses = [],
@@ -277,7 +346,7 @@ const init = async({
 }) => {
     const canvas = {
             dist: null,
-            distName: `png-mergered.png`,
+            distName: `png-mergered2.png`,
             tip: null,
             tipName: null
         },
@@ -290,9 +359,14 @@ const init = async({
                 width: 0,
                 height: 0
             }
+        },
+        maxWidth = {
+            width: 0,
+            index: 0,
+            colCount: 0
         };
 
-    let tmp, rowWidth, colHeight, makeRes, rowLen, colLen, pos;
+    let colHeight, makeRes, tmpRow, tmpX, rowWidth, tmpObj, pos;
 
     for (let dir of images) {
         await pickUpPngs(dir);
@@ -303,49 +377,69 @@ const init = async({
     pngInfos = sortBy(pngInfos, true);
     pngInfos = toRows(pngInfos);
 
-    colHeight = 0;
+    colHeight = 0;  
 
-    colLen = pngInfos.length;
-    pngInfos.forEach((row) => {
-        rowLen = pngInfos.length;
-        tmp = [];
+    //  获取最大宽度的一行
+    pngInfos.forEach((row, rowIndex) => {
         rowWidth = 0;
-        row.forEach((item, index) => {
-            // item.drawPos = {
-            //     x: pngInfos[colLen - 1][index] ? pngInfos[colLen - 1][index].pos.x : item.pos.x,
-            //     y: item.pos.y
-            // };
-            // pos = {
-            //     x: item.pos.x,
-            //     y: item.pos.y + (index * 50)
-            // };
-            // row[index].textPos = pos;
-            // rowWidth += item.width;
+        row.forEach((col, colIndex) => {
+            rowWidth += col.width;
+        });
+        if (rowWidth > maxWidth.width) {
+            maxWidth.width = rowWidth;
+            maxWidth.index = rowIndex;
+            maxWidth.colCount = row.length;
+        }
+    });
+
+    //  给每一项声明drawPos(图片画布地址), 防止出现图片之间距离过小的问题
+    pngInfos.forEach((row, rowIndex) => {
+        tmpRow = pngInfos[maxWidth.index];
+        row.forEach((col, colIndex) => {
+            tmpObj = {
+                y: col.pos.y
+            };
+
+            if (rowIndex < maxWidth.index) {
+                if (maxWidth.colCount === 10) {
+                    tmpX = tmpRow[colIndex].pos.x;
+                } else {
+                    tmpX = Math.floor(maxWidth.colCount / 10 * pngInfos[maxWidth.index][colIndex - maxWidth.colCount + 9].pos.x);
+                }
+                tmpObj.x = tmpX;
+                pos = {
+                    x: tmpObj.x,
+                    y: tmpObj.y + col.height
+                };
+                col.drawPos = tmpObj;
+            } else {
+                col.drawPos = col.pos;
+            }
+            col.textPos = pos;
         });
         colHeight += maxHeight(row);
-        tmp.push(rowWidth);
     });
 
     total.dist = {
-        width: Math.max.apply(null, tmp),
+        width: maxWidth.width,
         height: colHeight
     };
 
     total.tip = {
-        width: Math.max.apply(null, tmp),
+        width: maxWidth.width,
         height: colHeight + pngInfos.length * 50
     };
 
     canvas.dist = image(total.dist.width, total.dist.height);
 
+    //  绘制雪碧图
     pngInfos.forEach((row, rowIndex) => {
-        row.forEach(({ file, width, height, pos, drawPos }, colIndex) => {
-            console.log(drawPos)
-            canvas.dist.draw(image(file), pos.x, pos.y);
+        row.forEach(({ file, drawPos }, colIndex) => {
+            canvas.dist.draw(image(file), drawPos.x, drawPos.y);
         });
     });
 
-    // makeRes = await makeMarkUp(pngInfos, total);
+    makeRes = await makeMarkUp(pngInfos, total);
 
     if (makeRes) {
         canvas.tipName = path.basename(tipPath);
@@ -353,17 +447,15 @@ const init = async({
 
         pngInfos.forEach((row, rowIndex) => {
             row.forEach(({ file, width, height, pos }, colIndex) => {
-                // canvas.tip.draw(image(file), pos.x, tmp.y);
+                canvas.tip.draw(image(file), pos.x, tmp.y);
             });
         });
-        // canvas.tip.save(canvas.tipName);
+        canvas.tip.save(canvas.tipName);
     }
 
-    if (typeof canvas.dist.save === "function") {
-        canvas.dist.save(canvas.distName, {
-            quality: 100 * level
-        });
-    }
+    canvas.dist.save(canvas.distName, {
+        quality: 100 * level
+    });
 
     image.gc();
 };
