@@ -157,11 +157,11 @@ if (args.csses) {
 }
 
 
-    /**
-     * 从某个目录提取所有css文件并解析成AST
-     * @param  {String} dir
-     * @return {Array}
-     */
+/**
+ * 从某个目录提取所有css文件并解析成AST
+ * @param  {String} dir
+ * @return {Array}
+ */
 const pickUpCsses = async(dir) => {
         try {
             const files = fse.readdirSync(dir);
@@ -300,37 +300,44 @@ const pickUpCsses = async(dir) => {
  * 根据每个节点值生成HTML结构, 生成标注图的底图
  * @param  {[type]} nodes
  * @param  {[type]} total
- * @return {Boolean}
+ * @return {Promise}
  */
 const makeMarkUp = async(nodes, total) => {
-    let html = [], page;
-    tipPath = path.resolve(cwd, "png-tip.jpg");
-    html.push("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><style type='text/css'>body {position: relative:background: transparent;}.node-el {position: absolute;font-size: 12px;color: #336;}</style></head><body>");
-    for (let row of nodes) {
-        for (let { pos, textPos, width, height } of row) {
-            html.push(`<div class="node-el" style="left: ${textPos.x}px; top: ${textPos.y}px;">
-                        x: ${pos.x} <br/> y: ${pos.y}
+    return new Promise((resolve, reject) => {
+        let html = [],
+            page;
+        tipPath = path.resolve(cwd, "png-tmp.png");
+        html.push("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><style type='text/css'>body {position: relative:background: transparent;}.node-el {position: absolute;font-size: 12px;color: #000;}</style></head><body>");
+        for (let row of nodes) {
+            for (let { drawPos, width, height } of row) {
+                html.push(`<div class="node-el" style="left: ${drawPos.x}px; top: ${drawPos.y}px;">
+                        <p>x: ${drawPos.x}px;</p>
+                        <p>y: ${drawPos.y}px;</p>
+                        <p>width: ${width}px;</p>
+                        <p>height: ${height}px;</p>
                     </div>`);
+            }
         }
-    }
-    html.push("</body></html>");
-    html = html.join("");
-    try {
-        puppeteer.launch({
-            ...total.tip
-        }).then(async browser => {
-            page = await browser.newPage();
-            await page.setContent(html);
-            await page.screenshot({
-                path: tipPath,
-                fullPage: true
-            });
-            await browser.close();
-        });
-        return true;
-    } catch (e) {
-        return false;
-    }
+        html.push("</body></html>");
+        html = html.join("");
+        try {
+            puppeteer.launch()
+                .then(async(browser) => {
+                    page = await browser.newPage();
+                    page.setViewport(total.tip);
+                    await page.setContent(html);
+                    await page._emulationManager._client.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
+                    await page.screenshot({
+                        path: tipPath,
+                        fullPage: true
+                    });
+                    await browser.close();
+                });
+            resolve(true);
+        } catch (e) {
+            resolve(false);
+        }
+    });
 };
 
 /**
@@ -344,12 +351,16 @@ const init = async({
     csses = [],
     level = 1
 }) => {
+
+    //  canvas对象, 存储合并后的雪碧图和标注图
     const canvas = {
             dist: null,
-            distName: `png-mergered2.png`,
+            distName: "png-mergered.png",
             tip: null,
-            tipName: null
+            tipName: "png-tip.png"
         },
+
+        //  合并后的图片尺寸信息
         total = {
             dist: {
                 width: 0,
@@ -377,7 +388,7 @@ const init = async({
     pngInfos = sortBy(pngInfos, true);
     pngInfos = toRows(pngInfos);
 
-    colHeight = 0;  
+    colHeight = 0;
 
     //  获取最大宽度的一行
     pngInfos.forEach((row, rowIndex) => {
@@ -407,55 +418,43 @@ const init = async({
                     tmpX = Math.floor(maxWidth.colCount / 10 * pngInfos[maxWidth.index][colIndex - maxWidth.colCount + 9].pos.x);
                 }
                 tmpObj.x = tmpX;
-                pos = {
-                    x: tmpObj.x,
-                    y: tmpObj.y + col.height
-                };
                 col.drawPos = tmpObj;
             } else {
                 col.drawPos = col.pos;
             }
-            col.textPos = pos;
         });
         colHeight += maxHeight(row);
     });
 
-    total.dist = {
+    total.dist = total.tip = {
         width: maxWidth.width,
         height: colHeight
     };
 
-    total.tip = {
-        width: maxWidth.width,
-        height: colHeight + pngInfos.length * 50
-    };
-
     canvas.dist = image(total.dist.width, total.dist.height);
+    canvas.tip = image(total.tip.width, total.dist.height);
 
     //  绘制雪碧图
-    pngInfos.forEach((row, rowIndex) => {
-        row.forEach(({ file, drawPos }, colIndex) => {
+    pngInfos.forEach((row) => {
+        row.forEach(({ file, drawPos }) => {
             canvas.dist.draw(image(file), drawPos.x, drawPos.y);
         });
     });
 
-    makeRes = await makeMarkUp(pngInfos, total);
-
-    if (makeRes) {
-        canvas.tipName = path.basename(tipPath);
-        canvas.tip = image(total.tip.width, total.tip.height);
-
-        pngInfos.forEach((row, rowIndex) => {
-            row.forEach(({ file, width, height, pos }, colIndex) => {
-                canvas.tip.draw(image(file), pos.x, tmp.y);
-            });
-        });
-        canvas.tip.save(canvas.tipName);
-    }
-
     canvas.dist.save(canvas.distName, {
         quality: 100 * level
     });
+
+    //  开始绘制标注图
+    makeRes = await makeMarkUp(pngInfos, total);
+
+    if (makeRes) {
+        canvas.tip.draw(image(canvas.distName), 0, 0);
+        canvas.tip.draw(image(tipPath), 0, 0);
+        canvas.tip.save(canvas.tipName, {
+            quality: 100
+        });
+    }
 
     image.gc();
 };

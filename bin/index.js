@@ -351,45 +351,52 @@ toRows = () => {
  * 根据每个节点值生成HTML结构, 生成标注图的底图
  * @param  {[type]} nodes
  * @param  {[type]} total
- * @return {Boolean}
+ * @return {Promise}
  */
 const makeMarkUp = (() => {
     var _ref3 = _asyncToGenerator(function* (nodes, total) {
-        let html = [],
-            page;
-        tipPath = path.resolve(cwd, "png-tip.jpg");
-        html.push("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><style type='text/css'>body {position: relative:background: transparent;}.node-el {position: absolute;font-size: 12px;color: #336;}</style></head><body>");
-        for (let row of nodes) {
-            for (let _ref4 of row) {
-                let { pos, textPos, width, height } = _ref4;
+        return new Promise(function (resolve, reject) {
+            let html = [],
+                page;
+            tipPath = path.resolve(cwd, "png-tmp.png");
+            html.push("<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><style type='text/css'>body {position: relative:background: transparent;}.node-el {position: absolute;font-size: 12px;color: #000;}</style></head><body>");
+            for (let row of nodes) {
+                for (let _ref4 of row) {
+                    let { drawPos, width, height } = _ref4;
 
-                html.push(`<div class="node-el" style="left: ${textPos.x}px; top: ${textPos.y}px;">
-                        x: ${pos.x} <br/> y: ${pos.y}
+                    html.push(`<div class="node-el" style="left: ${drawPos.x}px; top: ${drawPos.y}px;">
+                        <p>x: ${drawPos.x}px;</p>
+                        <p>y: ${drawPos.y}px;</p>
+                        <p>width: ${width}px;</p>
+                        <p>height: ${height}px;</p>
                     </div>`);
+                }
             }
-        }
-        html.push("</body></html>");
-        html = html.join("");
-        try {
-            _puppeteer2.default.launch(_extends({}, total.tip)).then((() => {
-                var _ref5 = _asyncToGenerator(function* (browser) {
-                    page = yield browser.newPage();
-                    yield page.setContent(html);
-                    yield page.screenshot({
-                        path: tipPath,
-                        fullPage: true
+            html.push("</body></html>");
+            html = html.join("");
+            try {
+                _puppeteer2.default.launch().then((() => {
+                    var _ref5 = _asyncToGenerator(function* (browser) {
+                        page = yield browser.newPage();
+                        page.setViewport(total.tip);
+                        yield page.setContent(html);
+                        yield page._emulationManager._client.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
+                        yield page.screenshot({
+                            path: tipPath,
+                            fullPage: true
+                        });
+                        yield browser.close();
                     });
-                    yield browser.close();
-                });
 
-                return function (_x5) {
-                    return _ref5.apply(this, arguments);
-                };
-            })());
-            return true;
-        } catch (e) {
-            return false;
-        }
+                    return function (_x5) {
+                        return _ref5.apply(this, arguments);
+                    };
+                })());
+                resolve(true);
+            } catch (e) {
+                resolve(false);
+            }
+        });
     });
 
     return function makeMarkUp(_x3, _x4) {
@@ -409,13 +416,18 @@ const init = (() => {
         csses = [],
         level = 1
     }) {
+
+        //  canvas对象, 存储合并后的雪碧图和标注图
         const canvas = {
             dist: null,
-            distName: `png-mergered2.png`,
+            distName: "png-mergered.png",
             tip: null,
-            tipName: null
+            tipName: "png-tip.png"
         },
-              total = {
+
+
+        //  合并后的图片尺寸信息
+        total = {
             dist: {
                 width: 0,
                 height: 0
@@ -472,55 +484,43 @@ const init = (() => {
                         tmpX = Math.floor(maxWidth.colCount / 10 * pngInfos[maxWidth.index][colIndex - maxWidth.colCount + 9].pos.x);
                     }
                     tmpObj.x = tmpX;
-                    pos = {
-                        x: tmpObj.x,
-                        y: tmpObj.y + col.height
-                    };
                     col.drawPos = tmpObj;
                 } else {
                     col.drawPos = col.pos;
                 }
-                col.textPos = pos;
             });
             colHeight += maxHeight(row);
         });
 
-        total.dist = {
+        total.dist = total.tip = {
             width: maxWidth.width,
             height: colHeight
         };
 
-        total.tip = {
-            width: maxWidth.width,
-            height: colHeight + pngInfos.length * 50
-        };
-
         canvas.dist = (0, _images2.default)(total.dist.width, total.dist.height);
+        canvas.tip = (0, _images2.default)(total.tip.width, total.dist.height);
 
         //  绘制雪碧图
-        pngInfos.forEach(function (row, rowIndex) {
-            row.forEach(function ({ file, drawPos }, colIndex) {
+        pngInfos.forEach(function (row) {
+            row.forEach(function ({ file, drawPos }) {
                 canvas.dist.draw((0, _images2.default)(file), drawPos.x, drawPos.y);
             });
         });
 
-        makeRes = yield makeMarkUp(pngInfos, total);
-
-        if (makeRes) {
-            canvas.tipName = path.basename(tipPath);
-            canvas.tip = (0, _images2.default)(total.tip.width, total.tip.height);
-
-            pngInfos.forEach(function (row, rowIndex) {
-                row.forEach(function ({ file, width, height, pos }, colIndex) {
-                    canvas.tip.draw((0, _images2.default)(file), pos.x, tmp.y);
-                });
-            });
-            canvas.tip.save(canvas.tipName);
-        }
-
         canvas.dist.save(canvas.distName, {
             quality: 100 * level
         });
+
+        //  开始绘制标注图
+        makeRes = yield makeMarkUp(pngInfos, total);
+
+        if (makeRes) {
+            canvas.tip.draw((0, _images2.default)(canvas.distName), 0, 0);
+            canvas.tip.draw((0, _images2.default)(tipPath), 0, 0);
+            canvas.tip.save(canvas.tipName, {
+                quality: 100
+            });
+        }
 
         _images2.default.gc();
     });
